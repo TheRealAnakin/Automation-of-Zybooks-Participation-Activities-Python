@@ -1,0 +1,90 @@
+(async () => {
+  console.log("⏳ Starting autofill script...");
+
+  const delay = ms => new Promise(r => setTimeout(r, ms));
+
+  // 1. Wait until any kind of input or textarea is present
+  const maxInitWait = 10000;
+  const startTime = Date.now();
+  while (
+    document.querySelectorAll(".zb-input, .zb-textarea").length === 0
+  ) {
+    if (Date.now() - startTime > maxInitWait) throw "Timeout: no inputs found";
+    await delay(200);
+  }
+
+  console.log(`✅ Inputs or textareas found.`);
+
+  // 2. Click all "Show Answer" buttons multiple times to trigger answer reveal
+  const maxTries = 5;
+  let answers = [];
+  for (let i = 1; i <= maxTries; i++) {
+    document.querySelectorAll(".zb-button.secondary.show-answer-button")
+      .forEach(btn => btn.click());
+
+    await delay(800); // wait for DOM updates
+
+    answers = document.querySelectorAll(".forfeit-answer");
+    console.log(`Attempt ${i}: Found ${answers.length} answer(s)`);
+
+    if (answers.length > 0) break;
+  }
+
+  if (answers.length === 0) throw "❌ No answers found.";
+
+  // 3. Fill answers into closest input or textarea
+  answers.forEach(ans => {
+    const text = ans.textContent.trim();
+    if (!text) return;
+
+    // Try to find the closest .zb-input or .zb-textarea
+    let input =
+      ans.closest(".question-set-question")?.querySelector(".zb-input, .zb-textarea");
+
+    if (input) {
+      input.value = text;
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      console.log(`✍️ Filled input/textarea with: ${text}`);
+    } else {
+      console.warn("⚠️ No input or textarea found for answer:", text);
+    }
+  });
+
+  // 4. Click all "Check" buttons
+  const checkButtons = document.querySelectorAll(".zb-button.primary.raised.check-button");
+  checkButtons.forEach(b => b.click());
+  console.log(`✅ Clicked ${checkButtons.length} Check button(s)`);
+
+  // 5. Wait for correctness feedback
+  await new Promise(resolve => {
+    const obs = new MutationObserver(() => {
+      const feed = document.querySelectorAll(".zb-explanation.correct, .zb-explanation.incorrect");
+      if (feed.length >= checkButtons.length) {
+        obs.disconnect();
+        resolve();
+      }
+    });
+    obs.observe(document.body, { childList: true, subtree: true });
+  });
+  console.log("ℹ️ Feedback detected.");
+
+  // 6. Handle multiple choice fallback
+  document.querySelectorAll(".question-set-question.multiple-choice-question")
+    .forEach(q => q.querySelectorAll('input[type="radio"]')[0]?.click());
+
+  await delay(500);
+
+  document.querySelectorAll(".question-set-question.multiple-choice-question")
+    .forEach(q => {
+      if (q.querySelector(".zb-explanation.incorrect")) {
+        const radios = q.querySelectorAll('input[type="radio"]');
+        const alt = radios[0].checked ? radios[1] : radios[0];
+        if (alt) alt.click();
+        q.querySelector(".zb-button.primary.raised.check-button")?.click();
+        console.log("🔁 Re-tried incorrect MCQ");
+      }
+    });
+
+  console.log("🎉 Done!");
+})();
+
